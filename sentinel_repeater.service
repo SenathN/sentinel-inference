@@ -1,0 +1,27 @@
+[Unit]
+Description=Sentinel Repeater Service
+After=network.target multi-user.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=i_deed
+Group=i_deed
+WorkingDirectory=/home/i_deed/Desktop/sentinel-files/ultralytics_v1
+# Use the Python interpreter from your virtual environment
+ExecStart=/home/i_deed/Desktop/sentinel-files/sentinel_ult_venv/bin/python /home/i_deed/Desktop/sentinel-files/ultralytics_v1/repeater.py
+
+# Restart the service if it crashes
+Restart=always
+RestartSec=20
+
+# Optional: Limit how fast it restarts to avoid CPU spin
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+# Nice logging
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

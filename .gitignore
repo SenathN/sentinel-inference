@@ -1,0 +1,5 @@
+inference_script/sentinel_data/*
+inference_script/*.pt
+
+old_files/*
+repeater_logs/*
