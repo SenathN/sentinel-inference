@@ -14,7 +14,8 @@ ist_now = utc_now + dt.timedelta(hours=5, minutes=30)
 sync_log_dir_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "synchronizer_logs", 
                                str(ist_now.year), 
                                f"{ist_now.month:02d}", 
-                               f"{ist_now.day:02d}")
+                               f"{ist_now.day:02d}",
+                               f"{ist_now.hour:02d}")
 os.makedirs(sync_log_dir_path, exist_ok=True)
 
 # Generate synchronizer log filename with timestamp
@@ -86,28 +87,49 @@ def calculate_file_hash(file_path):
 def collect_latest_data():
     """Collect the latest 5 JSON files and their corresponding images"""
     try:
-        # Get all hourly folders and sort them
-        hourly_folders = []
+        # Get all date folders and sort them
+        date_folders = []
         for item in os.listdir(SENTINEL_DATA_DIR):
             folder_path = os.path.join(SENTINEL_DATA_DIR, item)
             if os.path.isdir(folder_path):
-                hourly_folders.append(folder_path)
+                date_folders.append(folder_path)
         
-        if not hourly_folders:
-            logger.warning("No hourly folders found")
+        if not date_folders:
+            logger.warning("No date folders found")
             return []
         
-        # Sort folders by name (which includes date and hour)
-        hourly_folders.sort(reverse=True)  # Get latest first
+        # Sort date folders by name (newest first)
+        date_folders.sort(reverse=True)
+        logger.info(f"Found {len(date_folders)} date folders: {[os.path.basename(f) for f in date_folders]}")
+        
+        # Collect hourly folders from all date folders
+        hourly_folders = []
+        for date_folder in date_folders:
+            for item in os.listdir(date_folder):
+                hour_folder_path = os.path.join(date_folder, item)
+                if os.path.isdir(hour_folder_path):
+                    hourly_folders.append(hour_folder_path)
+        
+        # Sort hourly folders by full path (newest first)
+        hourly_folders.sort(reverse=True)
+        logger.info(f"Found {len(hourly_folders)} hourly folders total")
         
         collected_data = []
         
-        # Collect up to 5 most recent JSON files
-        for folder in hourly_folders[:5]:  # Check up to 5 latest folders
+        # Collect up to 5 most recent JSON files from the latest folder first
+        logger.info(f"Collecting up to 5 items from most recent folders")
+        
+        for folder in hourly_folders:  # Process folders in order (newest first)
+            if len(collected_data) >= 5:
+                break  # Stop when we have 5 items
+                
             json_files = [f for f in os.listdir(folder) if f.endswith('.json')]
             json_files.sort(reverse=True)  # Get latest first
+            logger.info(f"Folder {os.path.basename(os.path.dirname(folder))}/{os.path.basename(folder)}: found {len(json_files)} JSON files")
             
-            for json_file in json_files[:1]:  # Take 1 latest from each folder
+            # Take as many as needed from this folder
+            needed = 5 - len(collected_data)
+            for json_file in json_files[:needed]:  # Take only what we need
                 json_path = os.path.join(folder, json_file)
                 
                 try:
@@ -136,13 +158,13 @@ def collect_latest_data():
                                         'hash': image_hash,
                                         'size_bytes': os.path.getsize(image_path)
                                     },
-                                    'source_folder': os.path.basename(folder),
+                                    'source_folder': f"{os.path.basename(os.path.dirname(folder))}/{os.path.basename(folder)}",
                                     'checksum': hashlib.sha256(
                                         (json.dumps(json_data) + image_hash).encode()
                                     ).hexdigest()
                                 }
                                 collected_data.append(transmission_data)
-                                logger.info(f"Collected data from {json_file}")
+                                logger.info(f"Collected data from {json_file} (total: {len(collected_data)}/5)")
                             else:
                                 logger.error(f"Failed to encode image {image_file}")
                         else:
@@ -154,6 +176,7 @@ def collect_latest_data():
                     logger.error(f"Error processing {json_file}: {e}")
                     continue
         
+        logger.info(f"Collection complete: {len(collected_data)} items ready for upload")
         return collected_data
         
     except Exception as e:

@@ -105,7 +105,8 @@ device_id = platform.node() or 'unknown_device'
 utc_now = datetime.datetime.utcnow()
 ist_time = utc_now + datetime.timedelta(hours=5, minutes=30)
 timestamp = ist_time.strftime("%Y%m%d-%H%M%S")
-hour_folder = ist_time.strftime("%Y-%m-%d-%H")  # Format: 2025-04-13_14
+date_folder = ist_time.strftime("%Y-%m-%d")  # Format: 2025-04-13
+hour_folder = ist_time.strftime("%H")  # Format: 14
 
 # Create unique identifier for image-JSON pair
 unique_id = f"{device_id}_{timestamp}_{str(uuid.uuid4())[:8]}"
@@ -121,8 +122,9 @@ lat = sample_lat
 lon = sample_lon
 gps_time = ist_time.strftime("%Y-%m-%dT%H:%M:%S+05:30")
 
-# Create hourly subdirectory
-hourly_output_dir = os.path.join(OUTPUT_DIR, hour_folder)
+# Create date and hour subdirectories
+date_output_dir = os.path.join(OUTPUT_DIR, date_folder)
+hourly_output_dir = os.path.join(date_output_dir, hour_folder)
 os.makedirs(hourly_output_dir, exist_ok=True)
 
 filename = f"sentinel_{timestamp}_{unique_id}.jpg"
