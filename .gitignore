@@ -3,3 +3,4 @@ inference_script/*.pt
 
 old_files/*
 repeater_logs/*
+synchronizer_logs/*

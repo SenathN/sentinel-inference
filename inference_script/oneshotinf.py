@@ -18,6 +18,9 @@ from ultralytics import YOLO  # Ultralytics YOLO (2023+)
 import os
 import json
 import pynmea2  # For parsing NMEA if needed (fallback)
+import uuid
+import datetime
+import platform
 
 # Create output directory
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -95,11 +98,35 @@ for box, conf, cls_id in zip(boxes, confs, clss):
 # Overlay passenger count
 cv2.putText(frame_bgr, f"Passengers: {count}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 3)
 
+# Get device unique ID
+device_id = platform.node() or 'unknown_device'
+
+# Get timestamp in +0530 timezone
+utc_now = datetime.datetime.utcnow()
+ist_time = utc_now + datetime.timedelta(hours=5, minutes=30)
+timestamp = ist_time.strftime("%Y%m%d-%H%M%S")
+hour_folder = ist_time.strftime("%Y-%m-%d-%H")  # Format: 2025-04-13_14
+
+# Create unique identifier for image-JSON pair
+unique_id = f"{device_id}_{timestamp}_{str(uuid.uuid4())[:8]}"
+
+# Sample location coordinates (fallback when GPS unavailable)
+sample_lat = 28.6139  # New Delhi sample latitude
+sample_lon = 77.2090  # New Delhi sample longitude
+
 # Get GPS and timestamp
 # lat, lon, gps_time = get_gps_data()
-timestamp = time.strftime("%Y%m%d_%H%M%S")
-filename = f"sentinel_{timestamp}.jpg"
-filepath = os.path.join(OUTPUT_DIR, filename)
+# Use sample coordinates as fallback
+lat = sample_lat
+lon = sample_lon
+gps_time = ist_time.strftime("%Y-%m-%dT%H:%M:%S+05:30")
+
+# Create hourly subdirectory
+hourly_output_dir = os.path.join(OUTPUT_DIR, hour_folder)
+os.makedirs(hourly_output_dir, exist_ok=True)
+
+filename = f"sentinel_{timestamp}_{unique_id}.jpg"
+filepath = os.path.join(hourly_output_dir, filename)
 
 # Save image
 cv2.imwrite(filepath, frame_bgr)
@@ -107,13 +134,16 @@ print(f"[Save] Image saved: {filepath} | Passengers: {count}")
 
 # Save JSON log
 log_data = {
-#     "timestamp": gps_time,
+    "unique_id": unique_id,
+    "timestamp": gps_time,
     "passenger_count": count,
-#     "latitude": lat,
-#     "longitude": lon,
-    "image_file": filename
+    "latitude": lat,
+    "longitude": lon,
+    "image_file": filename,
+    "device_id": device_id,
+    "timezone": "+05:30"
 }
-log_path = os.path.join(OUTPUT_DIR, f"sentinel_{timestamp}.json")
+log_path = os.path.join(hourly_output_dir, f"sentinel_{timestamp}_{unique_id}.json")
 with open(log_path, 'w') as f:
     json.dump(log_data, f)
 print(f"[Log] JSON saved: {log_path}")
