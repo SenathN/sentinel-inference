@@ -118,7 +118,7 @@ def collect_latest_data():
         
         collected_data = []
         
-        SYNC_COUNT = 5
+        SYNC_COUNT = 10
 
         # Collect up to SYNC_COUNT most recent JSON files from the latest folder first
         logger.info(f"Collecting up to SYNC_COUNT items from most recent folders")

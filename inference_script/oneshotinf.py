@@ -111,16 +111,25 @@ hour_folder = ist_time.strftime("%H")  # Format: 14
 # Create unique identifier for image-JSON pair (simplified for archiver)
 unique_id = f"sentinel_{timestamp}_{str(uuid.uuid4())[:8]}"
 
-# Sample location coordinates (fallback when GPS unavailable)
-sample_lat = 28.6139  # New Delhi sample latitude
-sample_lon = 77.2090  # New Delhi sample longitude
+# Get timestamp first
+gps_time = ist_time.strftime("%Y-%m-%dT%H:%M:%S+05:30")
 
 # Get GPS and timestamp
 # lat, lon, gps_time = get_gps_data()
-# Use sample coordinates as fallback
-lat = sample_lat
-lon = sample_lon
-gps_time = ist_time.strftime("%Y-%m-%dT%H:%M:%S+05:30")
+# Use time-based coordinate mapping as fallback
+try:
+    # Import the coordinate mapping function
+    import sys
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from linear_coords_map import get_coordinate_by_timestamp
+    
+    # Get coordinates based on current time
+    lat, lon = get_coordinate_by_timestamp(gps_time)
+except Exception as e:
+    print(f"[Coords] Error using time-based mapping: {e}")
+    # Fallback to hardcoded coordinates
+    lat = 28.6139  # New Delhi sample latitude
+    lon = 77.2090  # New Delhi sample longitude
 
 # Create date and hour subdirectories
 date_output_dir = os.path.join(OUTPUT_DIR, date_folder)

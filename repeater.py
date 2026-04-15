@@ -43,7 +43,7 @@ logger.info(f"Log file created: {log_file_path}")
 # 
 
 def main():
-    max_run_count = 3
+    max_run_count = 1
 
     while max_run_count > 0:
         try:
