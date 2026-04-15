@@ -108,8 +108,8 @@ timestamp = ist_time.strftime("%Y%m%d-%H%M%S")
 date_folder = ist_time.strftime("%Y-%m-%d")  # Format: 2025-04-13
 hour_folder = ist_time.strftime("%H")  # Format: 14
 
-# Create unique identifier for image-JSON pair
-unique_id = f"{device_id}_{timestamp}_{str(uuid.uuid4())[:8]}"
+# Create unique identifier for image-JSON pair (simplified for archiver)
+unique_id = f"sentinel_{timestamp}_{str(uuid.uuid4())[:8]}"
 
 # Sample location coordinates (fallback when GPS unavailable)
 sample_lat = 28.6139  # New Delhi sample latitude
@@ -127,7 +127,7 @@ date_output_dir = os.path.join(OUTPUT_DIR, date_folder)
 hourly_output_dir = os.path.join(date_output_dir, hour_folder)
 os.makedirs(hourly_output_dir, exist_ok=True)
 
-filename = f"sentinel_{timestamp}_{unique_id}.jpg"
+filename = f"{unique_id}.jpg"
 filepath = os.path.join(hourly_output_dir, filename)
 
 # Save image
@@ -145,7 +145,7 @@ log_data = {
     "device_id": device_id,
     "timezone": "+05:30"
 }
-log_path = os.path.join(hourly_output_dir, f"sentinel_{timestamp}_{unique_id}.json")
+log_path = os.path.join(hourly_output_dir, f"{unique_id}.json")
 with open(log_path, 'w') as f:
     json.dump(log_data, f)
 print(f"[Log] JSON saved: {log_path}")

@@ -1,6 +1,8 @@
 inference_script/sentinel_data/*
+inference_script/inference_archive/*
 inference_script/*.pt
 
 old_files/*
 repeater_logs/*
 synchronizer_logs/*
+archiver_logs/*

@@ -1,0 +1,205 @@
+#!/usr/bin/env python3
+import os
+import json
+import shutil
+import logging
+import sys
+import datetime as dt
+
+# Create hierarchical log directory structure based on +0530 timezone (similar to repeater)
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+utc_now = dt.datetime.utcnow()
+ist_now = utc_now + dt.timedelta(hours=5, minutes=30)
+log_dir_path = os.path.join(CURRENT_DIR, "archiver_logs", 
+                           str(ist_now.year), 
+                           f"{ist_now.month:02d}", 
+                           f"{ist_now.day:02d}")
+os.makedirs(log_dir_path, exist_ok=True)
+
+# Generate hourly log filename (for complete hour)
+log_filename = f"{ist_now.strftime('%Y-%m-%d-%H')}-archiver_log.log"
+log_file_path = os.path.join(log_dir_path, log_filename)
+
+# Set up proper logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s +0530 - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(log_file_path),  # hierarchical file log
+        logging.StreamHandler()              # also show in journalctl
+    ]
+)
+
+logger = logging.getLogger(__name__)
+logger.info(f"Log file created: {log_file_path}")
+
+# Configuration
+SENTINEL_DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "inference_script", "sentinel_data")
+INFERENCE_ARCHIVE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "inference_script", "inference_archive")
+
+def archive_files(safe_archive_list):
+    """Move files from sentinel_data to inference_archive preserving folder structure"""
+    try:
+        logger.info(f"Starting archive process for {len(safe_archive_list)} items")
+        
+        archived_count = 0
+        failed_count = 0
+        
+        for archive_item in safe_archive_list:
+            try:
+                # The archive_item format is like "sentinel_20260414-143836_74455e65"
+                # This corresponds to the folder structure: YYYY/MM/DD/HH/
+                # We need to find this folder in sentinel_data and move it to inference_archive
+                
+                # Extract timestamp from archive item
+                # Format: sentinel_YYYYMMDD-HHMMSS_hash
+                timestamp_part = archive_item.split('_')[1]  # Get "20260414-143836"
+                date_part = timestamp_part.split('-')[0]     # Get "20260414"
+                time_part = timestamp_part.split('-')[1]     # Get "143836"
+                
+                # Parse the date and time
+                year = date_part[:4]
+                month = date_part[4:6]
+                day = date_part[6:8]
+                hour = time_part[:2]
+                
+                # Construct source folder path (handle both YYYY/MM/DD/HH and YYYY-MM-DD/HH formats)
+                # Try YYYY/MM/DD/HH format first
+                source_folder_path = os.path.join(SENTINEL_DATA_DIR, year, month, day, hour)
+                
+                if not os.path.exists(source_folder_path):
+                    # Try YYYY-MM-DD/HH format
+                    date_folder_name = f"{year}-{month}-{day}"
+                    source_folder_path = os.path.join(SENTINEL_DATA_DIR, date_folder_name, hour)
+                
+                if not os.path.exists(source_folder_path):
+                    logger.warning(f"Source folder not found: {source_folder_path}")
+                    failed_count += 1
+                    continue
+                
+                # Construct destination folder path (match source format)
+                if os.path.exists(os.path.join(INFERENCE_ARCHIVE_DIR, year, month, day, hour)):
+                    dest_folder_path = os.path.join(INFERENCE_ARCHIVE_DIR, year, month, day, hour)
+                else:
+                    date_folder_name = f"{year}-{month}-{day}"
+                    dest_folder_path = os.path.join(INFERENCE_ARCHIVE_DIR, date_folder_name, hour)
+                os.makedirs(dest_folder_path, exist_ok=True)
+                
+                # Find the specific files that match the archive item
+                source_items = os.listdir(source_folder_path)
+                matching_files = [item for item in source_items if archive_item in item]
+                
+                if not matching_files:
+                    logger.warning(f"No matching files found for {archive_item} in {source_folder_path}")
+                    failed_count += 1
+                    continue
+                
+                # Move each matching file (should be .jpg and .json pair)
+                for file_name in matching_files:
+                    source_path = os.path.join(source_folder_path, file_name)
+                    dest_path = os.path.join(dest_folder_path, file_name)
+                    
+                    if os.path.exists(dest_path):
+                        logger.warning(f"Destination already exists, removing: {dest_path}")
+                        os.remove(dest_path)
+                    
+                    logger.info(f"Moving {source_path} -> {dest_path}")
+                    shutil.move(source_path, dest_path)
+                    archived_count += 1
+                
+            except Exception as e:
+                logger.error(f"Error archiving {archive_item}: {e}")
+                failed_count += 1
+        
+        logger.info(f"Archive process completed: {archived_count} successful, {failed_count} failed")
+        return archived_count, failed_count
+        
+    except Exception as e:
+        logger.error(f"Critical error in archive process: {e}")
+        return 0, len(safe_archive_list)
+
+def process_backend_response(response_text):
+    """Process the backend response text to extract safe_archive_list"""
+    try:
+        logger.info("Processing backend response from synchronizer")
+        
+        if not response_text:
+            logger.error("Empty response text received")
+            return False
+        
+        # Parse the JSON response
+        try:
+            response_data = json.loads(response_text)
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse response JSON: {e}")
+            return False
+        
+        logger.info(f"=== BACKEND RESPONSE RECEIVED ===")
+        logger.info(f"Full Response: {json.dumps(response_data, indent=2)}")
+        
+        # Check if response has response_body (nested) or direct safe_archive_list
+        if 'response_body' in response_data:
+            # Handle nested response_body format
+            response_body = response_data.get('response_body', '')
+            logger.info(f"Response Body String: {response_body}")
+            
+            try:
+                response_body_parsed = json.loads(response_body)
+                logger.info(f"Parsed Response Body: {json.dumps(response_body_parsed, indent=2)}")
+                safe_archive_list = response_body_parsed.get('safe_archive_list', [])
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse response_body JSON: {e}")
+                return False
+        else:
+            # Handle direct response format
+            logger.info("Direct response format detected")
+            safe_archive_list = response_data.get('safe_archive_list', [])
+        
+        logger.info(f"=== EXTRACTED UNIQUE IDs LIST ===")
+        logger.info(f"Safe Archive List: {safe_archive_list}")
+        logger.info(f"Total items to archive: {len(safe_archive_list)}")
+        logger.info("=== END UNIQUE IDs LIST ===")
+        
+        if not safe_archive_list:
+            logger.info("No items in safe_archive_list to archive")
+            return True
+        
+        logger.info(f"Found {len(safe_archive_list)} items to archive: {safe_archive_list}")
+        
+        # Archive the files
+        archived_count, failed_count = archive_files(safe_archive_list)
+        
+        if failed_count == 0:
+            logger.info("All files archived successfully")
+            return True
+        else:
+            logger.warning(f"Archive completed with {failed_count} failures")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Error processing backend response: {e}")
+        return False
+
+def main():
+    """Main archiver function"""
+    logger.info("Starting archiver...")
+    
+    # Check if response text was provided as command line argument
+    if len(sys.argv) < 2:
+        logger.error("No backend response provided as argument")
+        return False
+    
+    response_text = sys.argv[1]
+    logger.info(f"Received backend response: {response_text[:100]}...")
+    
+    success = process_backend_response(response_text)
+    
+    if success:
+        logger.info("Archiver completed successfully")
+        return True
+    else:
+        logger.error("Archiver failed")
+        return False
+
+if __name__ == "__main__":
+    main()

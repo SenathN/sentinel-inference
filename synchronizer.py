@@ -7,6 +7,8 @@ from datetime import datetime
 import base64
 import hashlib
 import datetime as dt
+import subprocess
+import sys
 
 # Set up logging to synchronizer_logs directory
 utc_now = dt.datetime.utcnow()
@@ -116,19 +118,21 @@ def collect_latest_data():
         
         collected_data = []
         
-        # Collect up to 5 most recent JSON files from the latest folder first
-        logger.info(f"Collecting up to 5 items from most recent folders")
+        SYNC_COUNT = 5
+
+        # Collect up to SYNC_COUNT most recent JSON files from the latest folder first
+        logger.info(f"Collecting up to SYNC_COUNT items from most recent folders")
         
         for folder in hourly_folders:  # Process folders in order (newest first)
-            if len(collected_data) >= 5:
-                break  # Stop when we have 5 items
+            if len(collected_data) >= SYNC_COUNT:
+                break  # Stop when we have SYNC_COUNT items
                 
             json_files = [f for f in os.listdir(folder) if f.endswith('.json')]
             json_files.sort(reverse=True)  # Get latest first
             logger.info(f"Folder {os.path.basename(os.path.dirname(folder))}/{os.path.basename(folder)}: found {len(json_files)} JSON files")
             
             # Take as many as needed from this folder
-            needed = 5 - len(collected_data)
+            needed = SYNC_COUNT - len(collected_data)
             for json_file in json_files[:needed]:  # Take only what we need
                 json_path = os.path.join(folder, json_file)
                 
@@ -296,25 +300,25 @@ def send_to_backend(data_batch):
         if response.status_code == 200:
             logger.info(f"SUCCESS: Data successfully sent to backend")
             logger.info(f"Response Body: {response.text}")
-            return True
+            return True, response.text
         else:
             logger.error(f"FAILURE: Backend returned non-200 status")
             logger.error(f"Status Code: {response.status_code} ({_get_status_description(response.status_code)})")
             logger.error(f"Response Body: {response.text}")
-            return False
+            return False, response.text
             
     except requests.exceptions.Timeout:
         logger.error("Request to backend timed out")
-        return False
+        return False, ""
     except requests.exceptions.ConnectionError:
         logger.error("Could not connect to backend")
-        return False
+        return False, ""
     except requests.exceptions.RequestException as e:
         logger.error(f"Request error: {e}")
-        return False
+        return False, ""
     except Exception as e:
         logger.error(f"Unexpected error sending to backend: {e}")
-        return False
+        return False, ""
 
 
 def main():
@@ -332,7 +336,7 @@ def main():
     logger.info(f"Collected {len(collected_data)} records")
     
     # Send to backend (single API call)
-    success = send_to_backend(collected_data)
+    success, response_text = send_to_backend(collected_data)
     
     if success:
         logger.info("Synchronization completed successfully")

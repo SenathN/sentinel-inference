@@ -43,7 +43,7 @@ logger.info(f"Log file created: {log_file_path}")
 # 
 
 def main():
-    max_run_count = 1
+    max_run_count = 3
 
     while max_run_count > 0:
         try:
@@ -99,6 +99,24 @@ def main():
                 logger.error(f"Sync error: {result.stderr.strip()}")
     except Exception as e:
         logger.error(f"Error running synchronizer: {e}")
+    
+    # Run archiver independently after synchronization (regardless of sync success/failure)
+    logger.info("Starting archiver independently...")
+    try:
+        archiver_path = os.path.join(CURRENT_DIR, "archiver.py")
+        archiver_result = subprocess.run([sys.executable, archiver_path], 
+                                      capture_output=True, text=True, cwd=CURRENT_DIR)
+        
+        if archiver_result.returncode == 0:
+            logger.info("Archiver completed successfully")
+            if archiver_result.stdout:
+                logger.info(f"Archiver output: {archiver_result.stdout.strip()}")
+        else:
+            logger.error(f"Archiver failed with return code {archiver_result.returncode}")
+            if archiver_result.stderr:
+                logger.error(f"Archiver error: {archiver_result.stderr.strip()}")
+    except Exception as e:
+        logger.error(f"Error running archiver: {e}")
         
 if __name__ == "__main__":
     main()
