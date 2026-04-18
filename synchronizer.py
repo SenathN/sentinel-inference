@@ -1,103 +1,85 @@
 #!/usr/bin/env python3
+
+# Standard library imports
 import os
 import json
-import requests
 import logging
-from datetime import datetime
-import base64
 import hashlib
-import datetime as dt
 import subprocess
 import sys
+from datetime import datetime
 
-# Set up logging to synchronizer_logs directory
-utc_now = dt.datetime.utcnow()
-ist_now = utc_now + dt.timedelta(hours=5, minutes=30)
-sync_log_dir_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "synchronizer_logs", 
-                               str(ist_now.year), 
-                               f"{ist_now.month:02d}", 
-                               f"{ist_now.day:02d}",
-                               f"{ist_now.hour:02d}")
-os.makedirs(sync_log_dir_path, exist_ok=True)
+# Third-party imports
+import requests
 
-# Generate synchronizer log filename with timestamp
-sync_log_filename = f"{ist_now.strftime('%Y-%m-%d-%H')}-synchronizer.log"
-sync_log_file_path = os.path.join(sync_log_dir_path, sync_log_filename)
+# Local imports
+from utilities.time_utility import setup_logging, get_status_description
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s +0530 - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(sync_log_file_path),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
-logger.info(f"Synchronizer log file created: {sync_log_file_path}")
-
-def _get_status_description(status_code):
-    """Get human-readable description for HTTP status codes"""
-    status_descriptions = {
-        200: "OK",
-        201: "Created",
-        400: "Bad Request",
-        401: "Unauthorized",
-        403: "Forbidden",
-        404: "Not Found",
-        405: "Method Not Allowed",
-        408: "Request Timeout",
-        409: "Conflict",
-        422: "Unprocessable Entity",
-        429: "Too Many Requests",
-        500: "Internal Server Error",
-        502: "Bad Gateway",
-        503: "Service Unavailable",
-        504: "Gateway Timeout"
-    }
-    return status_descriptions.get(status_code, "Unknown Status")
-
-# Configuration
-BACKEND_URL = "http://192.168.1.124:8000/api/observer/data-sync"  # Backend URL
-API_KEY = "your-api-key-here"  # Update with your API key
+# Configuration constants
+BACKEND_URL = "http://192.168.1.124:8000/api/observer/data-sync"
+API_KEY = "your-api-key-here"
 SENTINEL_DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "inference_script", "sentinel_data")
+SYNC_COUNT = 15
+REQUEST_TIMEOUT = 120
+CHUNK_SIZE = 4096
+HASH_ALGORITHM = 'sha256'
+LOG_DIR_NAME = "synchronizer_logs"
+SENTINEL_VERSION = "1.0"
+BATCH_ID_LENGTH = 16
+
+# Initialize logging
+logger, sync_log_dir_path, ist_now = setup_logging(
+    base_dir=os.path.dirname(os.path.abspath(__file__)),
+    log_dir_name=LOG_DIR_NAME,
+    log_filename_prefix="synchronizer"
+)
+
+logger.info(f"Configuration: BACKEND_URL={BACKEND_URL}, SYNC_COUNT={SYNC_COUNT}, REQUEST_TIMEOUT={REQUEST_TIMEOUT}")
+
 
 # Generate backend response JSON filename with timestamp
 backend_json_filename = f"{ist_now.strftime('%Y-%m-%d-%H%M%S')}-backend_response.json"
 backend_json_file_path = os.path.join(sync_log_dir_path, backend_json_filename)
 
-def encode_image_to_base64(image_path):
-    """Encode image file to base64 string"""
-    try:
-        with open(image_path, "rb") as image_file:
-            return base64.b64encode(image_file.read()).decode('utf-8')
-    except Exception as e:
-        logger.error(f"Error encoding image {image_path}: {e}")
-        return None
 
 def calculate_file_hash(file_path):
-    """Calculate SHA256 hash of a file"""
+    """Calculate hash of a file using configured algorithm"""
     try:
-        hash_sha256 = hashlib.sha256()
+        logger.debug(f"Calculating {HASH_ALGORITHM} hash for file: {file_path}")
+        hash_func = getattr(hashlib, HASH_ALGORITHM)()
+        
         with open(file_path, "rb") as f:
-            for chunk in iter(lambda: f.read(4096), b""):
-                hash_sha256.update(chunk)
-        return hash_sha256.hexdigest()
+            for chunk in iter(lambda: f.read(CHUNK_SIZE), b""):
+                hash_func.update(chunk)
+        
+        file_hash = hash_func.hexdigest()
+        logger.debug(f"Hash calculated successfully: {file_hash}")
+        return file_hash
     except Exception as e:
         logger.error(f"Error calculating hash for {file_path}: {e}")
         return None
 
+
 def collect_latest_data():
-    """Collect the latest 5 JSON files and their corresponding images"""
+    """Collect the latest JSON files and their corresponding images"""
+    logger.info(f"Starting data collection from {SENTINEL_DATA_DIR}")
+    
     try:
+        # Validate data directory exists
+        if not os.path.exists(SENTINEL_DATA_DIR):
+            logger.error(f"Sentinel data directory does not exist: {SENTINEL_DATA_DIR}")
+            return []
+        
         # Get all date folders and sort them
         date_folders = []
         for item in os.listdir(SENTINEL_DATA_DIR):
             folder_path = os.path.join(SENTINEL_DATA_DIR, item)
             if os.path.isdir(folder_path):
                 date_folders.append(folder_path)
+                logger.debug(f"Found date folder: {item}")
         
         if not date_folders:
-            logger.warning("No date folders found")
+            logger.warning("No date folders found in sentinel data directory")
             return []
         
         # Sort date folders by name (newest first)
@@ -107,244 +89,340 @@ def collect_latest_data():
         # Collect hourly folders from all date folders
         hourly_folders = []
         for date_folder in date_folders:
-            for item in os.listdir(date_folder):
-                hour_folder_path = os.path.join(date_folder, item)
-                if os.path.isdir(hour_folder_path):
-                    hourly_folders.append(hour_folder_path)
+            try:
+                for item in os.listdir(date_folder):
+                    hour_folder_path = os.path.join(date_folder, item)
+                    if os.path.isdir(hour_folder_path):
+                        hourly_folders.append(hour_folder_path)
+                        logger.debug(f"Found hourly folder: {os.path.basename(date_folder)}/{item}")
+            except Exception as e:
+                logger.warning(f"Error accessing date folder {date_folder}: {e}")
+                continue
+        
+        if not hourly_folders:
+            logger.warning("No hourly folders found")
+            return []
         
         # Sort hourly folders by full path (newest first)
         hourly_folders.sort(reverse=True)
         logger.info(f"Found {len(hourly_folders)} hourly folders total")
         
         collected_data = []
+        processed_files = 0
+        skipped_files = 0
         
-        SYNC_COUNT = 10
-
         # Collect up to SYNC_COUNT most recent JSON files from the latest folder first
-        logger.info(f"Collecting up to SYNC_COUNT items from most recent folders")
+        logger.info(f"Collecting up to {SYNC_COUNT} items from most recent folders")
         
         for folder in hourly_folders:  # Process folders in order (newest first)
             if len(collected_data) >= SYNC_COUNT:
-                break  # Stop when we have SYNC_COUNT items
+                logger.info(f"Reached target collection count: {SYNC_COUNT}")
+                break
                 
-            json_files = [f for f in os.listdir(folder) if f.endswith('.json')]
-            json_files.sort(reverse=True)  # Get latest first
-            logger.info(f"Folder {os.path.basename(os.path.dirname(folder))}/{os.path.basename(folder)}: found {len(json_files)} JSON files")
-            
-            # Take as many as needed from this folder
-            needed = SYNC_COUNT - len(collected_data)
-            for json_file in json_files[:needed]:  # Take only what we need
-                json_path = os.path.join(folder, json_file)
+            try:
+                json_files = [f for f in os.listdir(folder) if f.endswith('.json')]
+                json_files.sort(reverse=True)  # Get latest first
+                logger.info(f"Folder {os.path.basename(os.path.dirname(folder))}/{os.path.basename(folder)}: found {len(json_files)} JSON files")
                 
-                try:
-                    # Read JSON data
-                    with open(json_path, 'r') as f:
-                        json_data = json.load(f)
+                # Take as many as needed from this folder
+                needed = SYNC_COUNT - len(collected_data)
+                logger.debug(f"Need {needed} more items from this folder")
+                
+                for json_file in json_files[:needed]:  # Take only what we need
+                    json_path = os.path.join(folder, json_file)
+                    processed_files += 1
                     
-                    # Find corresponding image
-                    image_file = json_data.get('image_file', '')
-                    if image_file:
+                    try:
+                        logger.debug(f"Processing JSON file: {json_file}")
+                        
+                        # Read JSON data
+                        with open(json_path, 'r') as f:
+                            json_data = json.load(f)
+                        
+                        # Validate JSON structure
+                        if not isinstance(json_data, dict):
+                            logger.warning(f"Invalid JSON structure in {json_file}: not a dictionary")
+                            skipped_files += 1
+                            continue
+                        
+                        # Find corresponding image
+                        image_file = json_data.get('image_file', '')
+                        if not image_file:
+                            logger.warning(f"No image file specified in {json_file}")
+                            skipped_files += 1
+                            continue
+                        
                         image_path = os.path.join(folder, image_file)
                         
-                        if os.path.exists(image_path):
-                            # Encode image to base64
-                            image_base64 = encode_image_to_base64(image_path)
-                            image_hash = calculate_file_hash(image_path)
-                            
-                            if image_base64:
-                                # Prepare data for transmission
-                                transmission_data = {
-                                    'timestamp': datetime.now().isoformat(),
-                                    'detection_data': json_data,
-                                    'image_data': {
-                                        'filename': image_file,
-                                        'base64_data': image_base64,
-                                        'hash': image_hash,
-                                        'size_bytes': os.path.getsize(image_path)
-                                    },
-                                    'source_folder': f"{os.path.basename(os.path.dirname(folder))}/{os.path.basename(folder)}",
-                                    'checksum': hashlib.sha256(
-                                        (json.dumps(json_data) + image_hash).encode()
-                                    ).hexdigest()
-                                }
-                                collected_data.append(transmission_data)
-                                logger.info(f"Collected data from {json_file} (total: {len(collected_data)}/5)")
-                            else:
-                                logger.error(f"Failed to encode image {image_file}")
-                        else:
+                        if not os.path.exists(image_path):
                             logger.error(f"Image file not found: {image_path}")
-                    else:
-                        logger.error(f"No image file specified in {json_file}")
+                            skipped_files += 1
+                            continue
                         
-                except Exception as e:
-                    logger.error(f"Error processing {json_file}: {e}")
-                    continue
+                        # Calculate image hash and get file info
+                        logger.debug(f"Calculating hash for image: {image_file}")
+                        image_hash = calculate_file_hash(image_path)
+                        
+                        if not image_hash:
+                            logger.error(f"Failed to calculate hash for {image_file}")
+                            skipped_files += 1
+                            continue
+                        
+                        # Prepare data for transmission (image will be sent as file)
+                        transmission_data = {
+                            'timestamp': datetime.now().isoformat(),
+                            'detection_data': json_data,
+                            'image_data': {
+                                'filename': image_file,
+                                'hash': image_hash,
+                                'size_bytes': os.path.getsize(image_path)
+                            },
+                            'source_folder': f"{os.path.basename(os.path.dirname(folder))}/{os.path.basename(folder)}",
+                            'checksum': hashlib.sha256(
+                                (json.dumps(json_data, sort_keys=True) + image_hash).encode()
+                                ).hexdigest()
+                        }
+                        
+                        collected_data.append(transmission_data)
+                        logger.info(f"Successfully collected data from {json_file} (total: {len(collected_data)}/{SYNC_COUNT})")
+                        
+                    except json.JSONDecodeError as e:
+                        logger.error(f"Invalid JSON in {json_file}: {e}")
+                        skipped_files += 1
+                    except Exception as e:
+                        logger.error(f"Error processing {json_file}: {e}")
+                        skipped_files += 1
+                        continue
+                        
+            except Exception as e:
+                logger.error(f"Error processing folder {folder}: {e}")
+                continue
         
-        logger.info(f"Collection complete: {len(collected_data)} items ready for upload")
+        logger.info(f"Collection complete: {len(collected_data)} items ready for upload, {processed_files} files processed, {skipped_files} files skipped")
         return collected_data
         
     except Exception as e:
-        logger.error(f"Error collecting data: {e}")
+        logger.error(f"Critical error during data collection: {e}")
         return []
 
 def send_to_backend(data_batch):
-    """Send collected data to backend via secure POST request"""
+    """Send collected data to backend via multipart form data"""
+    logger.info(f"Preparing to send {len(data_batch)} records to backend")
+    
     try:
-        headers = {
-            'Content-Type': 'application/json',
-            'Authorization': f'Bearer {API_KEY}',
-            'X-API-Key': API_KEY
+        # Validate input
+        if not data_batch:
+            logger.error("No data to send")
+            return False, "No data provided"
+        
+        # Generate batch ID
+        batch_id = hashlib.sha256(datetime.now().isoformat().encode()).hexdigest()[:BATCH_ID_LENGTH]
+        logger.info(f"Generated batch ID: {batch_id}")
+        
+        # Prepare form data
+        fields = {
+            'batch_id': batch_id,
+            'sentinel_version': SENTINEL_VERSION,
+            'data_count': str(len(data_batch)),
+            'sync_timestamp': datetime.now().isoformat()
         }
         
-        # Prepare the payload
-        payload = {
-            'batch_id': hashlib.sha256(
-                datetime.now().isoformat().encode()
-            ).hexdigest()[:16],
-            'sentinel_version': '1.0',
-            'data_count': len(data_batch),
-            'data': data_batch
-        }
+        # Prepare files
+        files = []
+        prepared_files = 0
+        failed_files = 0
         
-        # Log detailed request information
-        logger.info(f"=== SYNCHRONIZATION REQUEST ===")
-        logger.info(f"Backend URL: {BACKEND_URL}")
-        logger.info(f"Batch ID: {payload['batch_id']}")
-        logger.info(f"Records to send: {len(data_batch)}")
-        logger.info(f"Total payload size: {len(json.dumps(payload))} bytes")
-        
-        # Log individual record details
         for i, record in enumerate(data_batch):
-            logger.info(f"Record {i+1}: {record.get('source_folder', 'unknown')} - {record.get('detection_data', {}).get('image_file', 'unknown')}")
+            try:
+                logger.debug(f"Preparing record {i+1}/{len(data_batch)}")
+                
+                # Validate record structure
+                required_keys = ['timestamp', 'detection_data', 'image_data', 'source_folder', 'checksum']
+                if not all(key in record for key in required_keys):
+                    logger.error(f"Record {i+1} missing required keys")
+                    failed_files += 1
+                    continue
+                
+                # Add JSON metadata
+                json_data = {
+                    'timestamp': record['timestamp'],
+                    'detection_data': record['detection_data'],
+                    'image_info': {
+                        'filename': record['image_data']['filename'],
+                        'hash': record['image_data']['hash'],
+                        'size_bytes': record['image_data']['size_bytes']
+                    },
+                    'source_folder': record['source_folder'],
+                    'checksum': record['checksum']
+                }
+                fields[f'data_{i}'] = json.dumps(json_data, sort_keys=True)
+                
+                # Add image file
+                image_path = os.path.join(
+                    SENTINEL_DATA_DIR, 
+                    record['source_folder'].replace('/', os.sep), 
+                    record['image_data']['filename']
+                )
+                
+                if os.path.exists(image_path):
+                    file_size = os.path.getsize(image_path)
+                    logger.debug(f"Adding image file: {record['image_data']['filename']}, size: {file_size} bytes")
+                    
+                    # Try using indexed field name to match data_{i} pattern
+                    files.append((
+                        f'image_{i}',  # Field name matching data_{i}
+                        (record['image_data']['filename'], open(image_path, 'rb'), 'image/jpeg')
+                    ))
+                    prepared_files += 1
+                else:
+                    logger.error(f"Image file not found for record {i+1}: {image_path}")
+                    failed_files += 1
+                    
+            except Exception as e:
+                logger.error(f"Error preparing record {i+1}: {e}")
+                failed_files += 1
+                continue
         
-        # Network diagnostics before sending
-        logger.info("=== NETWORK DIAGNOSTICS ===")
-        import socket
-        from urllib.parse import urlparse
+        if failed_files > 0:
+            logger.warning(f"Failed to prepare {failed_files} records")
         
-        parsed_url = urlparse(BACKEND_URL)
-        host = parsed_url.hostname
-        port = parsed_url.port or (443 if parsed_url.scheme == 'https' else 80)
+        if not files:
+            logger.error("No valid files to send")
+            return False, "No valid files to upload"
         
-        logger.info(f"Target Host: {host}")
-        logger.info(f"Target Port: {port}")
-        logger.info(f"Protocol: {parsed_url.scheme}")
-        
-        # Test basic connectivity
-        try:
-            logger.info("Testing basic TCP connectivity...")
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(5)
-            result = sock.connect_ex((host, port))
-            sock.close()
-            
-            if result == 0:
-                logger.info(f"✓ TCP connection to {host}:{port} successful")
-            else:
-                logger.error(f"✗ TCP connection to {host}:{port} failed (error code: {result})")
-                return False
-        except Exception as e:
-            logger.error(f"✗ Network connectivity test failed: {e}")
-            return False
-        
-        # Send POST request with timeout
-        logger.info("Sending POST request to backend...")
-        logger.info(f"Request Headers: {headers}")
-        logger.info(f"Request URL: {BACKEND_URL}")
-        
-        response = requests.post(
-            BACKEND_URL,
-            json=payload,
-            headers=headers,
-            timeout=30,
-            verify=False  # Disable SSL verification for HTTP
-        )
-        
-        # Log detailed response information
-        logger.info(f"=== BACKEND RESPONSE ===")
-        logger.info(f"Status Code: {response.status_code}")
-        logger.info(f"Response Headers: {dict(response.headers)}")
-        logger.info(f"Response Size: {len(response.content)} bytes")
-        
-        # Print status code for repeater to capture
-        print(f"Status Code: {response.status_code} ({_get_status_description(response.status_code)})")
-        
-        # Save backend response to JSON file in readable format
-        response_data = {
-            "timestamp": ist_now.strftime("%Y-%m-%dT%H:%M:%S+05:30"),
-            "status_code": response.status_code,
-            "status_description": _get_status_description(response.status_code),
-            "headers": dict(response.headers),
-            "response_body": response.text,
-            "request_url": BACKEND_URL,
-            "data_count": len(data_batch),
-            "success": response.status_code == 200
+        # Headers
+        headers = {
+            'Authorization': f'Bearer {API_KEY}',
+            'X-API-Key': API_KEY,
+            'User-Agent': f'Sentinel-Synchronizer/{SENTINEL_VERSION}'
         }
         
-        try:
-            with open(backend_json_file_path, 'w') as f:
-                json.dump(response_data, f, indent=2, sort_keys=True)
-            logger.info(f"Backend response saved to: {backend_json_file_path}")
-            
-            # Log readable summary to .log file
-            logger.info("=== BACKEND RESPONSE SUMMARY ===")
-            logger.info(f"Status: {response.status_code} {_get_status_description(response.status_code)}")
-            logger.info(f"Timestamp: {response_data['timestamp']}")
-            logger.info(f"Data Count: {len(data_batch)}")
-            logger.info(f"Response Body: {response.text}")
-            logger.info("=== END BACKEND RESPONSE ===")
-            
-        except Exception as e:
-            logger.error(f"Failed to save backend response: {e}")
+        logger.info(f"Sending {len(data_batch)} records with {len(files)} images to {BACKEND_URL}")
+        logger.debug(f"Request headers: {headers}")
+        logger.debug(f"Form data fields: {list(fields.keys())}")
+        logger.debug(f"Files being uploaded: {[f[0] for f in files]}")
         
-        if response.status_code == 200:
-            logger.info(f"SUCCESS: Data successfully sent to backend")
-            logger.info(f"Response Body: {response.text}")
-            return True, response.text
-        else:
-            logger.error(f"FAILURE: Backend returned non-200 status")
-            logger.error(f"Status Code: {response.status_code} ({_get_status_description(response.status_code)})")
-            logger.error(f"Response Body: {response.text}")
-            return False, response.text
+        # Send request
+        try:
+            response = requests.post(
+                BACKEND_URL,
+                files=files,
+                data=fields,
+                headers=headers,
+                timeout=REQUEST_TIMEOUT
+            )
+        except requests.exceptions.Timeout:
+            logger.error(f"Request timeout after {REQUEST_TIMEOUT} seconds")
+            return False, "Request timeout"
+        except requests.exceptions.ConnectionError as e:
+            logger.error(f"Connection error: {e}")
+            return False, "Connection error"
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Request exception: {e}")
+            return False, "Request failed"
+        
+        # Close files
+        for file_tuple in files:
+            try:
+                if len(file_tuple) == 3:
+                    # Format: (field_name, (filename, file_obj, content_type))
+                    file_obj = file_tuple[1][1]
+                else:
+                    # Format: (field_name, file_obj)
+                    file_obj = file_tuple[1]
+                if hasattr(file_obj, 'close'):
+                    file_obj.close()
+            except Exception as e:
+                logger.warning(f"Error closing file: {e}")
+        
+        # Log response details
+        logger.info(f"Status: {response.status_code} ({get_status_description(response.status_code)})")
+        logger.info(f"Response headers: {dict(response.headers)}")
+        
+        # Save response to file for debugging
+        try:
+            response_data = {
+                'batch_id': batch_id,
+                'timestamp': datetime.now().isoformat(),
+                'status_code': response.status_code,
+                'status_description': get_status_description(response.status_code),
+                'response_text': response.text,
+                'headers': dict(response.headers),
+                'records_sent': len(data_batch),
+                'files_uploaded': len(files)
+            }
             
-    except requests.exceptions.Timeout:
-        logger.error("Request to backend timed out")
-        return False, ""
-    except requests.exceptions.ConnectionError:
-        logger.error("Could not connect to backend")
-        return False, ""
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Request error: {e}")
-        return False, ""
+            with open(backend_json_file_path, 'w') as f:
+                json.dump(response_data, f, indent=2)
+            
+            logger.info(f"Response saved to: {backend_json_file_path}")
+        except Exception as e:
+            logger.warning(f"Failed to save response to file: {e}")
+        
+        # Log response content (truncated if too long)
+        response_text = response.text
+        if len(response_text) > 1000:
+            logger.info(f"Response content (truncated): {response_text[:1000]}...")
+        else:
+            logger.info(f"Response content: {response_text}")
+        
+        return response.status_code == 200, response.text
+        
     except Exception as e:
-        logger.error(f"Unexpected error sending to backend: {e}")
-        return False, ""
+        logger.error(f"Critical error during backend transmission: {e}")
+        return False, str(e)
 
 
 def main():
     """Main synchronizer function"""
-    logger.info("Starting synchronizer...")
+    start_time = datetime.now()
+    logger.info("=" * 80)
+    logger.info(f"Starting synchronizer at {start_time.isoformat()}")
+    logger.info(f"Target: {BACKEND_URL}")
+    logger.info(f"Data directory: {SENTINEL_DATA_DIR}")
+    logger.info("=" * 80)
     
-    # Collect latest data
-    collected_data = collect_latest_data()
-    
-    if not collected_data:
-        logger.warning("No data to synchronize")
-        print("Status Code: NO_DATA")
+    try:
+        # Collect data
+        logger.info("Phase 1: Data collection")
+        collected_data = collect_latest_data()
+        
+        if not collected_data:
+            logger.warning("No data to synchronize")
+            logger.info("Synchronization completed: NO_DATA")
+            print("Status Code: NO_DATA")
+            return False
+        
+        logger.info(f"Phase 1 complete: Collected {len(collected_data)} records")
+        
+        # Send to backend
+        logger.info("Phase 2: Backend transmission")
+        success, response = send_to_backend(collected_data)
+        
+        end_time = datetime.now()
+        duration = (end_time - start_time).total_seconds()
+        
+        if success:
+            logger.info(f"Phase 2 complete: Transmission successful")
+            logger.info(f"Synchronization completed successfully in {duration:.2f} seconds")
+            logger.info("=" * 80)
+            print("Status Code: 200 (OK)")
+            return True
+        else:
+            logger.error(f"Phase 2 failed: Transmission unsuccessful")
+            logger.error(f"Synchronization failed after {duration:.2f} seconds")
+            logger.error(f"Backend response: {response}")
+            logger.info("=" * 80)
+            print("Status Code: SYNC_FAILED")
+            return False
+            
+    except KeyboardInterrupt:
+        logger.warning("Synchronization interrupted by user")
+        print("Status Code: INTERRUPTED")
         return False
-    
-    logger.info(f"Collected {len(collected_data)} records")
-    
-    # Send to backend (single API call)
-    success, response_text = send_to_backend(collected_data)
-    
-    if success:
-        logger.info("Synchronization completed successfully")
-        print("Status Code: 200 (OK)")
-        return True
-    else:
-        logger.error("Synchronization failed")
-        print("Status Code: SYNC_FAILED")
+    except Exception as e:
+        logger.error(f"Unexpected error in main: {e}")
+        print("Status Code: ERROR")
         return False
 
 if __name__ == "__main__":

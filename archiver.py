@@ -5,34 +5,17 @@ import shutil
 import logging
 import sys
 import requests
-import datetime as dt
 
-# Create hierarchical log directory structure based on +0530 timezone (similar to repeater)
+# Local imports
+from utilities.time_utility import setup_logging
+
+# Initialize logging
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-utc_now = dt.datetime.utcnow()
-ist_now = utc_now + dt.timedelta(hours=5, minutes=30)
-log_dir_path = os.path.join(CURRENT_DIR, "archiver_logs", 
-                           str(ist_now.year), 
-                           f"{ist_now.month:02d}", 
-                           f"{ist_now.day:02d}")
-os.makedirs(log_dir_path, exist_ok=True)
-
-# Generate hourly log filename (for complete hour)
-log_filename = f"{ist_now.strftime('%Y-%m-%d-%H')}-archiver_log.log"
-log_file_path = os.path.join(log_dir_path, log_filename)
-
-# Set up proper logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s +0530 - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(log_file_path),  # hierarchical file log
-        logging.StreamHandler()              # also show in journalctl
-    ]
+logger, log_dir_path, ist_now = setup_logging(
+    base_dir=CURRENT_DIR,
+    log_dir_name="archiver_logs",
+    log_filename_prefix="archiver_log"
 )
-
-logger = logging.getLogger(__name__)
-logger.info(f"Log file created: {log_file_path}")
 
 # Configuration
 SENTINEL_DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "inference_script", "sentinel_data")
@@ -50,6 +33,7 @@ def get_unarchived_unique_ids():
         all_unique_ids = []
         
         # Walk through all date/hour folders
+        all_files_with_dates = []
         for root, dirs, files in os.walk(SENTINEL_DATA_DIR):
             # Find JSON files and extract unique IDs
             for file in files:
@@ -60,14 +44,20 @@ def get_unarchived_unique_ids():
                             json_data = json.load(f)
                         unique_id = json_data.get('unique_id', '')
                         if unique_id and unique_id.startswith('sentinel_'):
-                            all_unique_ids.append(unique_id)
+                            # Get creation time for sorting
+                            creation_time = os.path.getctime(file_path)
+                            all_files_with_dates.append((unique_id, creation_time))
                     except Exception as e:
                         logger.warning(f"Error reading {file_path}: {e}")
         
-        logger.info(f"Found {len(all_unique_ids)} total unique IDs in local directory")
-        logger.info(f"Local unique IDs: {all_unique_ids}")
+        # Sort by creation time (newest first)
+        all_files_with_dates.sort(key=lambda x: x[1], reverse=True)
+        all_unique_ids = [item[0] for item in all_files_with_dates]
         
-        # Take first 50 IDs
+        logger.info(f"Found {len(all_unique_ids)} total unique IDs in local directory")
+        logger.info(f"Local unique IDs (sorted by creation date): {all_unique_ids}")
+        
+        # Take first 50 IDs (now sorted by creation date)
         unique_ids_to_check = all_unique_ids[:50]
         logger.info(f"Checking first {len(unique_ids_to_check)} IDs with backend")
         

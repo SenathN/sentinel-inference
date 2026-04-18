@@ -10,6 +10,7 @@ _MAX_INFERENCES = 10  # Not used in one-shot, but kept for reference
 import time
 import subprocess
 import io
+import sys
 from PIL import Image
 import numpy as np
 import cv2
@@ -21,6 +22,10 @@ import pynmea2  # For parsing NMEA if needed (fallback)
 import uuid
 import datetime
 import platform
+
+# Local imports
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from utilities.time_utility import get_ist_time
 
 # Create output directory
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -101,9 +106,8 @@ cv2.putText(frame_bgr, f"Passengers: {count}", (10, 30), cv2.FONT_HERSHEY_SIMPLE
 # Get device unique ID
 device_id = platform.node() or 'unknown_device'
 
-# Get timestamp in +0530 timezone
-utc_now = datetime.datetime.utcnow()
-ist_time = utc_now + datetime.timedelta(hours=5, minutes=30)
+# Get timestamp in +0530 timezone using utility
+ist_time = get_ist_time()
 timestamp = ist_time.strftime("%Y%m%d-%H%M%S")
 date_folder = ist_time.strftime("%Y-%m-%d")  # Format: 2025-04-13
 hour_folder = ist_time.strftime("%H")  # Format: 14
