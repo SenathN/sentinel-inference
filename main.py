@@ -15,14 +15,16 @@ import sys
 # Local imports
 from utilities.time_utility import setup_logging
 
-# CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+# Configuration constants
 CURRENT_DIR = "/home/i_deed/Desktop/sentinel-files/ultralytics_v1"
+LOG_DIR_NAME = "main_logs"
+LOG_FILENAME_PREFIX = "main"
 
 # Initialize logging
 logger, log_dir_path, ist_now = setup_logging(
     base_dir=CURRENT_DIR,
-    log_dir_name="main_logs",
-    log_filename_prefix="main"
+    log_dir_name=LOG_DIR_NAME,
+    log_filename_prefix=LOG_FILENAME_PREFIX
 )
 
 # Restart service for changes to take effect
@@ -32,25 +34,25 @@ logger, log_dir_path, ist_now = setup_logging(
 # 
 
 def run_inference():
-    """Run the inference script"""
+    """Run the inferencer controller"""
     try:
-        logger.info("Starting inference script...")
-        script_path = os.path.join(CURRENT_DIR, "inference_script", "oneshotinf.py")
-        result = subprocess.run([sys.executable, script_path], 
+        logger.info("Starting inferencer controller...")
+        inferencer_path = os.path.join(CURRENT_DIR, "inferencer.py")
+        result = subprocess.run([sys.executable, inferencer_path], 
                               capture_output=True, text=True, cwd=CURRENT_DIR)
         
         if result.returncode == 0:
-            logger.info("Inference script executed successfully")
+            logger.info("Inferencer controller executed successfully")
             if result.stdout:
                 logger.info(f"Output: {result.stdout.strip()}")
             return True
         else:
-            logger.error(f"Inference script failed with return code {result.returncode}")
+            logger.error(f"Inferencer controller failed with return code {result.returncode}")
             if result.stderr:
                 logger.error(f"Error: {result.stderr.strip()}")
             return False
     except Exception as e:
-        logger.error(f"Error occurred during inference: {e}")
+        logger.error(f"Error occurred during inferencer: {e}")
         logger.error(traceback.format_exc())
         return False
 
@@ -159,7 +161,7 @@ def main():
     
     # Summary
     logger.info("=" * 80)
-    logger.info("SENTinel SYSTEM RUN SUMMARY:")
+    logger.info("SENTINEL SYSTEM RUN SUMMARY:")
     logger.info(f"  Inference:    {'SUCCESS' if inference_success else 'FAILED'}")
     logger.info(f"  Synchronizer: {'SUCCESS' if sync_success else 'FAILED'}")
     logger.info(f"  Archiver:     {'SUCCESS' if archive_success else 'FAILED'}")

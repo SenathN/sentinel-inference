@@ -8,6 +8,7 @@ synchronizer_logs/*
 main_logs/*
 cleaner_logs/*
 archiver_logs/*
+inferencer_logs/*
 
 __pycache__/*
 *.pyc
