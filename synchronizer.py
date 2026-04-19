@@ -19,8 +19,8 @@ from utilities.time_utility import setup_logging, get_status_description
 BACKEND_URL = "http://192.168.1.124:8000/api/observer/data-sync"
 API_KEY = "your-api-key-here"
 SENTINEL_DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "inference_script", "sentinel_data")
-SYNC_COUNT = 15
-REQUEST_TIMEOUT = 120
+SYNC_COUNT = 8
+REQUEST_TIMEOUT = 180
 CHUNK_SIZE = 4096
 HASH_ALGORITHM = 'sha256'
 LOG_DIR_NAME = "synchronizer_logs"
