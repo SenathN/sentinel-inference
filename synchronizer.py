@@ -14,10 +14,11 @@ import requests
 
 # Local imports
 from utilities.time_utility import setup_logging, get_status_description
+from utilities.config import get_backend_url, get_api_key
 
 # Configuration constants
-BACKEND_URL = "http://192.168.1.124:8000/api/observer/data-sync"
-API_KEY = "your-api-key-here"
+BACKEND_URL = get_backend_url()
+API_KEY = get_api_key()
 SENTINEL_DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "inference_script", "sentinel_data")
 SYNC_COUNT = 8
 REQUEST_TIMEOUT = 180

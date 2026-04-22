@@ -3,7 +3,6 @@
 # =========================
 _DETECTION_THRESHOLD = 0.5
 _MAX_INFERENCES = 10  # Not used in one-shot, but kept for reference
-_USE_MOCK_DATA = True  # Generates a mock gps data of a moving entity intead of the current location
 
 # =========================
 # IMPORTS
@@ -26,6 +25,7 @@ import platform
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utilities.time_utility import get_ist_time
 from utilities.gps_utility import get_gps_data
+from utilities.config import use_mock_gps
 
 # Create output directory
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -94,7 +94,7 @@ unique_id = f"sentinel_{timestamp}_{str(uuid.uuid4())[:8]}"
 gps_time = ist_time.strftime("%Y-%m-%dT%H:%M:%S+05:30")
 
 # Get GPS coordinates
-if _USE_MOCK_DATA:
+if use_mock_gps():
     from linear_coords_map import get_coordinate_by_timestamp
     lat, lon = get_coordinate_by_timestamp(gps_time)
 else:

@@ -8,6 +8,7 @@ import requests
 
 # Local imports
 from utilities.time_utility import setup_logging
+from utilities.config import get_backend_sync_check_url, get_api_key
 
 # Initialize logging
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -20,8 +21,8 @@ logger, log_dir_path, ist_now = setup_logging(
 # Configuration
 SENTINEL_DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "inference_script", "sentinel_data")
 INFERENCE_ARCHIVE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "inference_script", "inference_archive")
-BACKEND_URL = "http://192.168.1.124:8000/api/observer/sync-check"
-API_KEY = "your-api-key-here"
+BACKEND_URL = get_backend_sync_check_url()
+API_KEY = get_api_key()
 
 def get_unarchived_unique_ids():
     """Scan local sentinel_data directory for unarchived unique_ids and sync with backend"""
