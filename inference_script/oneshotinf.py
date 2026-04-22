@@ -3,6 +3,7 @@
 # =========================
 _DETECTION_THRESHOLD = 0.5
 _MAX_INFERENCES = 10  # Not used in one-shot, but kept for reference
+_USE_MOCK_DATA = True  # Generates a mock gps data of a moving entity intead of the current location
 
 # =========================
 # IMPORTS
@@ -15,10 +16,8 @@ from PIL import Image
 import numpy as np
 import cv2
 from ultralytics import YOLO  # Ultralytics YOLO (2023+)
-# import gps  # For gpsd access
 import os
 import json
-import pynmea2  # For parsing NMEA if needed (fallback)
 import uuid
 import datetime
 import platform
@@ -26,6 +25,7 @@ import platform
 # Local imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utilities.time_utility import get_ist_time
+from utilities.gps_utility import get_gps_data
 
 # Create output directory
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -40,31 +40,6 @@ model = YOLO(model_path)
 model.to('cpu')  # CPU for RPi4
 print(f"[Model] Loaded {model_path} successfully")
 
-# GPS Setup (from tutorial)
-# session = gps.gps("localhost", "2947")  # Connect to gpsd
-# session.stream(gps.WATCH_ENABLE | gps.WATCH_NEWSTYLE)
-
-def get_gps_data():
-    try:
-        report = session.next()
-        if report['class'] == 'TPV':
-            lat = getattr(report, 'lat', None)
-            lon = getattr(report, 'lon', None)
-            utc_time = getattr(report, 'time', time.strftime("%Y-%m-%dT%H:%M:%SZ"))
-            if lat and lon:
-                return lat, lon, utc_time
-    except Exception as e:
-        print(f"[GPS] Error: {e}")
-    # Fallback: Parse raw NMEA if gpsd fails
-    try:
-        with open('/dev/serial0', 'r') as serial_port:
-            line = serial_port.readline()
-            if line.startswith('$GPGGA'):
-                msg = pynmea2.parse(line)
-                return msg.latitude, msg.longitude, msg.timestamp
-    except:
-        pass
-    return None, None, time.strftime("%Y-%m-%dT%H:%M:%SZ")  # Default to current time if no GPS
 
 # Camera command for single frame capture (modified for one-shot)
 cmd = [
@@ -118,22 +93,22 @@ unique_id = f"sentinel_{timestamp}_{str(uuid.uuid4())[:8]}"
 # Get timestamp first
 gps_time = ist_time.strftime("%Y-%m-%dT%H:%M:%S+05:30")
 
-# Get GPS and timestamp
-# lat, lon, gps_time = get_gps_data()
-# Use time-based coordinate mapping as fallback
-try:
-    # Import the coordinate mapping function
-    import sys
-    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Get GPS coordinates
+if _USE_MOCK_DATA:
     from linear_coords_map import get_coordinate_by_timestamp
-    
-    # Get coordinates based on current time
     lat, lon = get_coordinate_by_timestamp(gps_time)
-except Exception as e:
-    print(f"[Coords] Error using time-based mapping: {e}")
-    # Fallback to hardcoded coordinates
-    lat = 28.6139  # New Delhi sample latitude
-    lon = 77.2090  # New Delhi sample longitude
+else:
+    lat, lon, gps_utc = get_gps_data()
+
+if lat is None or lon is None:
+    print("[GPS] No fix available, using time-based coordinate mapping as fallback")
+    try:
+        from linear_coords_map import get_coordinate_by_timestamp
+        lat, lon = get_coordinate_by_timestamp(gps_time)
+    except Exception as e:
+        print(f"[Coords] Error using time-based mapping: {e}")
+        lat = 28.6139  # New Delhi sample latitude
+        lon = 77.2090  # New Delhi sample longitude
 
 # Create date and hour subdirectories
 date_output_dir = os.path.join(OUTPUT_DIR, date_folder)
