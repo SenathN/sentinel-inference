@@ -1,0 +1,24 @@
+# Sentinel Inference System - Benchmark Suite Requirements
+# Python dependencies for benchmark execution
+
+# System monitoring
+psutil>=5.9.0
+
+# Standard library (no installation required)
+# - subprocess
+# - time
+# - json
+# - threading
+# - statistics
+# - datetime
+# - os
+# - sys
+
+# Optional: For Word document generation
+# Uncomment if you want to use python-docx instead of pandoc
+# python-docx>=0.8.11
+
+# Optional: For plotting and visualization
+# Uncomment if you want to add visualization features
+# matplotlib>=3.5.0
+# numpy>=1.21.0

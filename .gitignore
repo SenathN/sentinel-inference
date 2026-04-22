@@ -12,3 +12,5 @@ inferencer_logs/*
 
 __pycache__/*
 *.pyc
+
+benchmark_results/*
